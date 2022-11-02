@@ -7,7 +7,15 @@ fn main() -> Result<()> {
     let python_exe = find_python_exe()?;
 
     let mut args: Vec<String> = env::args().collect();
-    let exe = fs::canonicalize(&args[0])?;
+
+    // On Windows fs::canonicalize() will work if there is no path, which is the
+    // intended way this exe will be invoked, however under Linux/macOS it will
+    // fail, so we need to fallback to finding ourselves in the path.
+    let exe = match fs::canonicalize(&args[0]) {
+        Ok(exe) => exe,
+        Err(_) => find_in_path(&args[0])?,
+    };
+
     let exe_name = exe.file_name().unwrap().to_str().unwrap();
     let mut script_path = exe
         .clone()
@@ -36,16 +44,29 @@ fn main() -> Result<()> {
 
 fn find_python_exe() -> Result<PathBuf> {
     let exe_name;
-    let path_delim;
     cfg_if! {
         if #[cfg(target_os = "windows")] {
             exe_name = "python.exe";
-            path_delim = ";";
         } else if #[cfg(target_os = "linux")] {
-            exe_name = "python";
-            path_delim = ":";
+            exe_name = "python3";
         } else if #[cfg(target_os = "macos")] {
             exe_name = "python3";
+        } else {
+            panic!("Unsupported platform");
+        }
+    }
+
+    find_in_path(exe_name)
+}
+
+fn find_in_path(exe_name: &str) -> Result<PathBuf> {
+    let path_delim;
+    cfg_if! {
+        if #[cfg(target_os = "windows")] {
+            path_delim = ";";
+        } else if #[cfg(target_os = "linux")] {
+            path_delim = ":";
+        } else if #[cfg(target_os = "macos")] {
             path_delim = ":";
         } else {
             panic!("Unsupported platform");
@@ -60,9 +81,6 @@ fn find_python_exe() -> Result<PathBuf> {
             return Ok(candidate);
         }
     }
-
-    // On Windows perhaps we could look in the registry under:
-    // HKEY_LOCAL_MACHINE\Software\Python\PythonCore\<version>\InstallPath
 
     Err(anyhow!("Failed to find {}", exe_name))
 }
